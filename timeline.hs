@@ -1,4 +1,5 @@
--- buildTimeline :: Task t => [t] -> d -> [d] -> [t]
+module Timeline
+       where
 
 import Data.Maybe
 import Data.Foldable
@@ -23,7 +24,7 @@ defaultTask = Task {name = Nothing,
 -- TODO: Workdays should be different for each person
 -- workdays :: Calendar.Day -> [Calendar.Day]
 
-
+-- TODO: Consider renaming this to weekdayGenerator
 -- Returns the next workday after the given day
 workdayGenerator :: Calendar.Day -> Calendar.Day
 workdayGenerator day | isWeekend nextDay = workdayGenerator nextDay
@@ -43,38 +44,27 @@ workdays generator start = result
     (_, result) = List.mapAccumL (workdaysStep generator) start [1..]
 
 
+updateTaskRange :: (Calendar.Day -> [Calendar.Day]) -> Calendar.Day -> Task -> Task
+updateTaskRange resourceWorkdays start task
+  | isJust taskDuration = task {range = Just (start, end)}
+  | otherwise = task
+  where
+    taskDuration = duration task
+    numWorkdaysMore = (round $ fromMaybe 0.0 taskDuration)
+    end | numWorkdaysMore == 1 = start
+        | otherwise            = last $ take numWorkdaysMore $ resourceWorkdays start
 
--- name' :: Task -> String
--- name' t = fromMaybe "<unnamed task>" $ name t
-
-
--- -- TODO: Need a function that computes non-workdays
-
--- updateRange :: Calendar.Day -> Task -> Task
--- updateRange start task 
---   | isJust taskDuration = task {range = Just (start, end)}
---   | otherwise  = task
---   where 
---     taskDuration = duration task
---     numDays = (round $ fromMaybe 0.0 taskDuration) - 1 -- Need to handle non-workdays
---     end = Calendar.addDays numDays start
     
--- updateRangeStep :: Calendar.Day -> Task -> (Calendar.Day, Task)
--- updateRangeStep curDay task = (curDay', task')
---   where task' = updateRange curDay task
---         curDay' = if isNothing $ range task'
---                   then curDay
---                   -- Need to handle going to next workday
---                   else Calendar.addDays 1 $ snd (fromMaybe (curDay, curDay) (range task')) 
+updateRangeStep :: (Calendar.Day -> [Calendar.Day]) -> Calendar.Day -> Task -> (Calendar.Day, Task)
+updateRangeStep resourceWorkdays curDay task = (curDay', task')
+  where task' = updateTaskRange resourceWorkdays curDay task
+        curDay' = if isNothing $ range task'
+                  then curDay
+                  else last $ take 2 $ resourceWorkdays curDay
 
 
--- layOutTasks :: Calendar.Day -> [Task] -> [Task]
--- layOutTasks start tasks = tasks'
---                                 where (_, tasks') = List.mapAccumL updateRangeStep start tasks
+layOutTasks :: (Calendar.Day -> [Calendar.Day]) -> Calendar.Day -> [Task] -> [Task]
+layOutTasks resourceWorkdays start tasks = tasks'
+  where (_, tasks') = List.mapAccumL (updateRangeStep resourceWorkdays) start tasks
 
 
-t1 = defaultTask {name = Just "Task 1", duration = Just 2.0}
-t2 = defaultTask {name = Just "Task 2", duration = Just 1.0}
-t3 = defaultTask {name = Just "Task 3", duration = Just 3.0}
-d = Calendar.fromGregorian 2012 9 22
-tasks = [t1, t2, t3]
