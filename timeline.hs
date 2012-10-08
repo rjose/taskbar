@@ -1,70 +1,41 @@
-module Timeline
-       where
+module Timeline where
 
-import Data.Maybe
-import Data.Foldable
-import qualified Data.List as List
 import qualified Data.Time.Calendar as Calendar
 import qualified Data.Time.Calendar.OrdinalDate as OrdinalDate
+import qualified Data.List as List
+import Data.Maybe
+import Work
 
-data Task = Task {
-  name :: Maybe String,
-  duration :: Maybe Double, -- Days
-  range :: Maybe (Calendar.Day, Calendar.Day),  -- Start and end dates
-  group :: Maybe String
-  } 
-          deriving (Show)
+days :: Calendar.Day -> [Calendar.Day]
+days start = let dayAdder = flip Calendar.addDays start
+             in map dayAdder [0..]
+                
+isWeekend :: Calendar.Day -> Bool
+isWeekend day = let dayOfWeek = snd $ OrdinalDate.mondayStartWeek day
+                    saturday = 6
+                in dayOfWeek >= saturday
                    
-defaultTask = Task {name = Nothing, 
-                    duration = Nothing, 
-                    range = Nothing,
-                    group = Nothing}
-              
-
--- TODO: Workdays should be different for each person
--- workdays :: Calendar.Day -> [Calendar.Day]
-
--- TODO: Consider renaming this to weekdayGenerator
--- Returns the next workday after the given day
-workdayGenerator :: Calendar.Day -> Calendar.Day
-workdayGenerator day | isWeekend nextDay = workdayGenerator nextDay
-                     | otherwise         = nextDay
-  where 
-    nextDay = Calendar.addDays 1 day
-    isWeekend d = (snd $ OrdinalDate.mondayStartWeek d) >= 6
-
-workdaysStep :: (Calendar.Day -> Calendar.Day) -> Calendar.Day -> a -> (Calendar.Day, Calendar.Day)
-workdaysStep generator curDay _ = (nextDay, nextDay)
-  where nextDay = generator curDay
+weekdays :: Calendar.Day -> [Calendar.Day]
+weekdays start = filter (\d -> not . isWeekend $ d) $ days start
 
 
-workdays :: (Calendar.Day -> Calendar.Day) -> Calendar.Day -> [Calendar.Day]
-workdays generator start = result
-  where
-    (_, result) = List.mapAccumL (workdaysStep generator) start [1..]
+scheduleWork :: [Calendar.Day]  -- ^ List of days when work can be scheduled
+             -> Work            -- ^ Work to be scheduled
+             -> Work            -- ^ Resulting Work with updated range
+scheduleWork days work
+  -- Assuming duration of 1d if not specified
+  | isNothing $ duration work = work {range = Just (startDay, startDay)}  
+  | otherwise = let numWorkdays = ceiling $ fromJust $ duration work
+                    endDay = days !! (numWorkdays - 1)
+                in work {range = Just (startDay, endDay)}
+  where startDay = days !! 0
 
 
-updateTaskRange :: (Calendar.Day -> [Calendar.Day]) -> Calendar.Day -> Task -> Task
-updateTaskRange resourceWorkdays start task
-  | isJust taskDuration = task {range = Just (start, end)}
-  | otherwise = task
-  where
-    taskDuration = duration task
-    numWorkdaysMore = (round $ fromMaybe 0.0 taskDuration)
-    end | numWorkdaysMore == 1 = start
-        | otherwise            = last $ take numWorkdaysMore $ resourceWorkdays start
-
-    
-updateRangeStep :: (Calendar.Day -> [Calendar.Day]) -> Calendar.Day -> Task -> (Calendar.Day, Task)
-updateRangeStep resourceWorkdays curDay task = (curDay', task')
-  where task' = updateTaskRange resourceWorkdays curDay task
-        curDay' = if isNothing $ range task'
-                  then curDay
-                  else last $ take 2 $ resourceWorkdays curDay
-
-
-layOutTasks :: (Calendar.Day -> [Calendar.Day]) -> Calendar.Day -> [Task] -> [Task]
-layOutTasks resourceWorkdays start tasks = tasks'
-  where (_, tasks') = List.mapAccumL (updateRangeStep resourceWorkdays) start tasks
-
-
+scheduleWorklist :: [Calendar.Day]  -- ^ List of days when work can be scheduled
+                 -> [Work]          -- ^ Worklist to be scheduled
+                 -> [Work]          -- ^ Scheduled work
+scheduleWorklist days worklist = snd $ List.mapAccumL step days worklist
+  where step dayList w = let w' = scheduleWork dayList w
+                             endDay = snd . fromJust . range $ w'
+                             dayList' = dropWhile (\d -> d <= endDay) dayList
+                         in (dayList', w')
